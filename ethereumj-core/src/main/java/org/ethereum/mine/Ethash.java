@@ -14,7 +14,7 @@ import static org.ethereum.util.ByteUtil.intToBytesNoLeadZeroes;
  *
  * Created by Anton Nashatyrev on 04.12.2015.
  */
-public class Ethash {
+public class Ethash implements Miner {
     private static EthashParams ethashParams = new EthashParams();
 
     private static Ethash cachedInstance = null;

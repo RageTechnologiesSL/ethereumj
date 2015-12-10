@@ -334,8 +334,8 @@ public class SyncManager {
     boolean isPeerStuck(Channel peer) {
         SyncStatistics stats = peer.getSyncStats();
 
-        return stats.millisSinceLastUpdate() > PEER_STUCK_TIMEOUT
-                || stats.getEmptyResponsesCount() > 0;
+        return stats.millisSinceLastUpdate() > PEER_STUCK_TIMEOUT/*
+                || stats.getEmptyResponsesCount() > 0*/;
     }
 
     void startMaster(Channel master) {

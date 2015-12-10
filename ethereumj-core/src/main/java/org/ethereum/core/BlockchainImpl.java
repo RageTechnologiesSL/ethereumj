@@ -5,6 +5,7 @@ import org.ethereum.crypto.HashUtil;
 import org.ethereum.db.BlockStore;
 import org.ethereum.listener.EthereumListener;
 import org.ethereum.manager.AdminInfo;
+import org.ethereum.mine.Miner;
 import org.ethereum.trie.Trie;
 import org.ethereum.trie.TrieImpl;
 import org.ethereum.util.AdvancedDeviceUtils;
@@ -191,6 +192,10 @@ public class BlockchainImpl implements Blockchain, org.ethereum.facade.Blockchai
     }
 
     public ImportResult tryConnectAndFork(Block block) {
+        return tryConnectAndFork(block, false);
+    }
+
+    public ImportResult tryConnectAndFork(Block block, boolean justMined) {
 
         Repository savedRepo = this.repository;
         Block savedBest = this.bestBlock;
@@ -204,7 +209,7 @@ public class BlockchainImpl implements Blockchain, org.ethereum.facade.Blockchai
         try {
 
             // FIXME: adding block with no option for flush
-            add(block);
+            add(block, null);
         } catch (Throwable th) {
             logger.error("Unexpected error: ", th);
         } finally {this.fork = false;}
@@ -289,6 +294,10 @@ public class BlockchainImpl implements Blockchain, org.ethereum.facade.Blockchai
 
     @Override
     public void add(Block block) {
+        add(block, null);
+    }
+
+    public void add(Block block, Miner miner) {
 
         if (exitOn < block.getNumber()) {
             System.out.print("Exiting after block.number: " + getBestBlock().getNumber());
@@ -338,6 +347,14 @@ public class BlockchainImpl implements Blockchain, org.ethereum.facade.Blockchai
         //System.out.println(" Receipts listroot is: " + receiptListHash + " logbloomlisthash is " + logBloomListHash);
 
         track.commit();
+
+        if (miner != null) {
+            logger.info("Updating stateRoot for block #{} and mining it...", block.getNumber());
+            block.getHeader().setStateRoot(repository.getRoot());
+            miner.mine(block.getHeader());
+            logger.info("Block #{} mined!", block.getNumber());
+        }
+
         storeBlock(block, receipts);
 
 
@@ -491,7 +508,7 @@ public class BlockchainImpl implements Blockchain, org.ethereum.facade.Blockchai
         return receipts;
     }
 
-    private List<TransactionReceipt> applyBlock(Block block) {
+    public List<TransactionReceipt> applyBlock(Block block) {
 
         logger.info("applyBlock: block: [{}] tx.list: [{}]", block.getNumber(), block.getTransactionsList().size());
         long saveTime = System.nanoTime();
@@ -706,6 +723,10 @@ public class BlockchainImpl implements Blockchain, org.ethereum.facade.Blockchai
         this.repository = repository;
     }
 
+    public Repository getRepository() {
+        return repository;
+    }
+
     public void setProgramInvokeFactory(ProgramInvokeFactory factory) {
         this.programInvokeFactory = factory;
     }
@@ -736,6 +757,14 @@ public class BlockchainImpl implements Blockchain, org.ethereum.facade.Blockchai
 
     public PendingState getPendingState() {
         return pendingState;
+    }
+
+    public BlockStore getBlockStore() {
+        return blockStore;
+    }
+
+    public ProgramInvokeFactory getProgramInvokeFactory() {
+        return programInvokeFactory;
     }
 
     @Override

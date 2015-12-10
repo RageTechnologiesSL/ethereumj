@@ -181,6 +181,10 @@ public class BlockHeader {
         return logsBloom;
     }
 
+    public void setLogsBloom(byte[] logsBloom) {
+        this.logsBloom = logsBloom;
+    }
+
     public byte[] getDifficulty() {
         return difficulty;
     }
@@ -236,6 +240,10 @@ public class BlockHeader {
 
     public byte[] getExtraData() {
         return extraData;
+    }
+
+    public void setExtraData(byte[] extraData) {
+        this.extraData = extraData;
     }
 
     public byte[] getNonce() {
