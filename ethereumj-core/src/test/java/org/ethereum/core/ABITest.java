@@ -168,4 +168,53 @@ public class ABITest {
             Hex.toHexString(function.encode(111, new byte[] {(byte) 0xab, (byte) 0xcd, (byte) 0xef}, 222)));
 
     }
+
+    @Test
+    public void decodeDynamicTest1() {
+        String funcJson = "{\n" +
+                "   'constant':false, \n" +
+                "   'inputs':[{'name':'i','type':'int'}, \n" +
+                "               {'name':'s','type':'bytes'}, \n" +
+                "               {'name':'j','type':'int'}], \n" +
+                "    'name':'f4', \n" +
+                "   'outputs':[{'name':'i','type':'int'}, \n" +
+                "               {'name':'s','type':'bytes'}, \n" +
+                "               {'name':'j','type':'int'}], \n" +
+                "    'type':'function' \n" +
+                "}\n";
+        funcJson = funcJson.replaceAll("'", "\"");
+
+        CallTransaction.Function function = CallTransaction.Function.fromJsonInterface(funcJson);
+        byte[] bytes = new byte[]{(byte) 0xab, (byte) 0xcd, (byte) 0xef};
+        byte[] encoded = function.encodeArguments(111, bytes, 222);
+        Object[] objects = function.decodeResult(encoded);
+//        System.out.println(Arrays.toString(objects));
+        Assert.assertEquals(((Number) objects[0]).intValue(), 111);
+        Assert.assertArrayEquals((byte[]) objects[1], bytes);
+        Assert.assertEquals(((Number) objects[2]).intValue(), 222);
+    }
+    @Test
+    public void decodeDynamicTest2() {
+        String funcJson = "{\n" +
+                "   'constant':false, \n" +
+                "   'inputs':[{'name':'i','type':'int'}, \n" +
+                "               {'name':'s','type':'string[]'}, \n" +
+                "               {'name':'j','type':'int'}], \n" +
+                "    'name':'f4', \n" +
+                "   'outputs':[{'name':'i','type':'int'}, \n" +
+                "               {'name':'s','type':'string[]'}, \n" +
+                "               {'name':'j','type':'int'}], \n" +
+                "    'type':'function' \n" +
+                "}\n";
+        funcJson = funcJson.replaceAll("'", "\"");
+
+        CallTransaction.Function function = CallTransaction.Function.fromJsonInterface(funcJson);
+        String[] strings = new String[] {"aaa", "long string: 123456789012345678901234567890", "ccc"};
+        byte[] encoded = function.encodeArguments(111, strings, 222);
+        Object[] objects = function.decodeResult(encoded);
+//        System.out.println(Arrays.toString(objects));
+        Assert.assertEquals(((Number) objects[0]).intValue(), 111);
+        Assert.assertArrayEquals((Object[]) objects[1], strings);
+        Assert.assertEquals(((Number) objects[2]).intValue(), 222);
+    }
 }

@@ -2,7 +2,6 @@ package org.ethereum.core;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.ethereum.crypto.SHA3Helper;
 import org.ethereum.util.ByteUtil;
 import org.spongycastle.util.encoders.Hex;
 
@@ -10,8 +9,14 @@ import java.io.IOException;
 import java.lang.reflect.Array;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
+import static java.lang.String.format;
+import static org.apache.commons.lang3.ArrayUtils.subarray;
+import static org.apache.commons.lang3.StringUtils.stripEnd;
+import static org.ethereum.crypto.SHA3Helper.sha3;
 import static org.ethereum.util.ByteUtil.longToBytesNoLeadZeroes;
 
 /**
@@ -81,12 +86,17 @@ public class CallTransaction {
          */
         public abstract byte[] encode(Object value);
 
-        public abstract Object decode(byte[] encoded);
+        public abstract Object decode(byte[] encoded, int offset);
+
+        public Object decode(byte[] encoded) {return decode(encoded, 0);}
 
         /**
-         * @return fixed size in bytes or negative value if the type is dynamic
+         * @return fixed size in bytes. For the dynamic types returns IntType.getFixedSize()
+         * which is effectively the int offset to dynamic data
          */
         public int getFixedSize() {return 32;}
+
+        public boolean isDynamicType() {return false;}
 
         @Override
         public String toString() {
@@ -161,8 +171,13 @@ public class CallTransaction {
         }
 
         @Override
-        public Object decode(byte[] encoded) {
-            throw new UnsupportedOperationException();
+        public Object[] decode(byte[] encoded, int offset) {
+            Object[] result = new Object[size];
+            for (int i = 0; i < size; i++) {
+                result[i] = elementType.decode(encoded, offset + i * elementType.getFixedSize());
+            }
+
+            return result;
         }
 
         @Override
@@ -184,22 +199,49 @@ public class CallTransaction {
 
         @Override
         public byte[] encodeList(List l) {
-            byte[][] elems = new byte[l.size() + 1][];
-            elems[0] = IntType.encodeInt(l.size());
-            for (int i = 0; i < l.size(); i++) {
-                elems[i + 1] = elementType.encode(l.get(i));
+            byte[][] elems;
+            if (elementType.isDynamicType()) {
+                elems = new byte[l.size() * 2 + 1][];
+                elems[0] = IntType.encodeInt(l.size());
+                int offset = l.size() * 32;
+                for (int i = 0; i < l.size(); i++) {
+                    elems[i + 1] = IntType.encodeInt(offset);
+                    byte[] encoded = elementType.encode(l.get(i));
+                    elems[l.size() + i + 1] = encoded;
+                    offset += 32 * ((encoded.length - 1) / 32 + 1);
+                }
+            } else {
+                elems = new byte[l.size() + 1][];
+                elems[0] = IntType.encodeInt(l.size());
+
+                for (int i = 0; i < l.size(); i++) {
+                    elems[i + 1] = elementType.encode(l.get(i));
+                }
             }
             return ByteUtil.merge(elems);
         }
 
         @Override
-        public Object decode(byte[] encoded) {
-            throw new UnsupportedOperationException();
+        public Object decode(byte[] encoded, int origOffset) {
+            int len = IntType.decodeInt(encoded, origOffset).intValue();
+            origOffset += 32;
+            int offset = origOffset;
+            Object[] ret = new Object[len];
+
+            for (int i = 0; i < len; i++) {
+                if (elementType.isDynamicType()) {
+                    ret[i] = elementType.decode(encoded, origOffset + IntType.decodeInt(encoded, offset).intValue());
+                } else {
+                    ret[i] = elementType.decode(encoded, offset);
+                }
+                offset += elementType.getFixedSize();
+            }
+            return ret;
         }
 
         @Override
-        public int getFixedSize() {
-            return -1;
+        public boolean isDynamicType() {
+            return true;
         }
     }
 
@@ -223,13 +265,15 @@ public class CallTransaction {
         }
 
         @Override
-        public Object decode(byte[] encoded) {
-            throw new UnsupportedOperationException();
+        public Object decode(byte[] encoded, int offset) {
+            int len = IntType.decodeInt(encoded, offset).intValue();
+            offset += 32;
+            return Arrays.copyOfRange(encoded, offset, offset + len);
         }
 
         @Override
-        public int getFixedSize() {
-            return -1;
+        public boolean isDynamicType() {
+            return true;
         }
     }
 
@@ -245,9 +289,8 @@ public class CallTransaction {
         }
 
         @Override
-        public Object decode(byte[] encoded) {
-            throw new UnsupportedOperationException();
-//            return new String(encoded, StandardCharsets.UTF_8);
+        public Object decode(byte[] encoded, int offset) {
+            return new String((byte[]) super.decode(encoded, offset), StandardCharsets.UTF_8);
         }
     }
 
@@ -272,8 +315,8 @@ public class CallTransaction {
         }
 
         @Override
-        public Object decode(byte[] encoded) {
-            return encoded;
+        public Object decode(byte[] encoded, int offset) {
+            return Arrays.copyOfRange(encoded, offset, getFixedSize());
         }
     }
 
@@ -336,10 +379,13 @@ public class CallTransaction {
         }
 
         @Override
-        public Object decode(byte[] encoded) {
-            return new BigInteger(encoded);
+        public Object decode(byte[] encoded, int offset) {
+            return decodeInt(encoded, offset);
         }
 
+        public static BigInteger decodeInt(byte[] encoded, int offset) {
+            return new BigInteger(Arrays.copyOfRange(encoded, offset, offset + 32));
+        }
         public static byte[] encodeInt(int i) {
             return encodeInt(new BigInteger("" + i));
         }
@@ -364,8 +410,8 @@ public class CallTransaction {
         }
 
         @Override
-        public Object decode(byte[] encoded) {
-            return Boolean.valueOf(((Number) super.decode(encoded)).intValue() != 0);
+        public Object decode(byte[] encoded, int offset) {
+            return Boolean.valueOf(((Number) super.decode(encoded, offset)).intValue() != 0);
         }
     }
 
@@ -389,6 +435,9 @@ public class CallTransaction {
         private Function() {}
 
         public byte[] encode(Object ... args) {
+            return ByteUtil.merge(encodeSignature(), encodeArguments(args));
+        }
+        public byte[] encodeArguments(Object ... args) {
             if (args.length > inputs.length) throw new RuntimeException("Too many arguments: " + args.length + " > " + inputs.length);
 
             int staticSize = 0;
@@ -396,53 +445,72 @@ public class CallTransaction {
             // calculating static size and number of dynamic params
             for (int i = 0; i < args.length; i++) {
                 Param param = inputs[i];
-                int sz = param.type.getFixedSize();
-                if (sz < 0) {
+                if (param.type.isDynamicType()) {
                     dynamicCnt++;
-                    staticSize += 32;
-                } else {
-                    staticSize += sz;
                 }
+                staticSize += param.type.getFixedSize();
             }
 
-            byte[][] bb = new byte[args.length + 1 + dynamicCnt][];
-            bb[0] = encodeSignature();
+            byte[][] bb = new byte[args.length + dynamicCnt][];
 
             int curDynamicPtr = staticSize;
             int curDynamicCnt = 0;
             for (int i = 0; i < args.length; i++) {
-                if (inputs[i].type.getFixedSize() < 0) {
+                if (inputs[i].type.isDynamicType()) {
                     byte[] dynBB = inputs[i].type.encode(args[i]);
-                    bb[i + 1] = IntType.encodeInt(curDynamicPtr);
-                    bb[args.length + 1 + curDynamicCnt] = dynBB;
+                    bb[i] = IntType.encodeInt(curDynamicPtr);
+                    bb[args.length + curDynamicCnt] = dynBB;
                     curDynamicCnt++;
                     curDynamicPtr += dynBB.length;
                 } else {
-                    bb[i + 1] = inputs[i].type.encode(args[i]);
+                    bb[i] = inputs[i].type.encode(args[i]);
                 }
             }
             return ByteUtil.merge(bb);
         }
 
+        private Object[] decode(byte[] encoded, Param[] params) {
+            Object[] ret = new Object[params.length];
+
+            int off = 0;
+            for (int i = 0; i < params.length; i++) {
+                if (params[i].type.isDynamicType()) {
+                    ret[i] = params[i].type.decode(encoded, IntType.decodeInt(encoded, off).intValue());
+                } else {
+                    ret[i] = params[i].type.decode(encoded, off);
+                }
+                off += params[i].type.getFixedSize();
+            }
+            return ret;
+        }
+
+        public Object[] decode(byte[] encoded) {
+            return decode(subarray(encoded, 4, encoded.length), inputs);
+        }
+
         public Object[] decodeResult(byte[] encodedRet) {
-            if (outputs.length > 1) {
-                throw new UnsupportedOperationException("Multiple return values not supported yet");
+            return decode(encodedRet, outputs);
+        }
+
+        public String formatSignature() {
+            StringBuilder paramsTypes = new StringBuilder();
+            for (Param param : inputs) {
+                paramsTypes.append(param.type.getCanonicalName()).append(",");
             }
-            if (outputs.length == 0) {
-                return new Object[0];
-            }
-            Type retType = outputs[0].type;
-            return new Object[] {retType.decode(encodedRet)};
+
+            return format("%s(%s)", name, stripEnd(paramsTypes.toString(), ","));
         }
 
         public byte[] encodeSignature() {
-            String sig = name + "(";
-            for (Param input : inputs) {
-                sig += input.type.getCanonicalName() + ",";
-            }
-            sig = sig.endsWith(",") ? sig.substring(0, sig.length() - 1) : sig;
-            sig = sig + ")";
-            return Arrays.copyOfRange(SHA3Helper.sha3(sig.getBytes()), 0, 4);
+            String signature = formatSignature();
+            byte[] sha3Fingerprint = sha3(signature.getBytes());
+
+            return Arrays.copyOfRange(sha3Fingerprint, 0, 4);
+        }
+
+        @Override
+        public String toString() {
+            return formatSignature();
         }
 
         public static Function fromJsonInterface(String json) {
